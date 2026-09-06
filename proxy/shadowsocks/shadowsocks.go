@@ -9,13 +9,13 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/xjasonlyu/tun2socks/v2/dialer"
-	M "github.com/xjasonlyu/tun2socks/v2/metadata"
-	"github.com/xjasonlyu/tun2socks/v2/proxy"
-	"github.com/xjasonlyu/tun2socks/v2/proxy/internal/utils"
-	"github.com/xjasonlyu/tun2socks/v2/transport/shadowsocks/core"
-	obfs "github.com/xjasonlyu/tun2socks/v2/transport/simple-obfs"
-	"github.com/xjasonlyu/tun2socks/v2/transport/socks5"
+	"github.com/FashionFarmer/tun2socks/v2/dialer"
+	M "github.com/FashionFarmer/tun2socks/v2/metadata"
+	"github.com/FashionFarmer/tun2socks/v2/proxy"
+	"github.com/FashionFarmer/tun2socks/v2/proxy/internal/utils"
+	"github.com/FashionFarmer/tun2socks/v2/transport/shadowsocks/core"
+	obfs "github.com/FashionFarmer/tun2socks/v2/transport/simple-obfs"
+	"github.com/FashionFarmer/tun2socks/v2/transport/socks5"
 )
 
 var _ proxy.Proxy = (*Shadowsocks)(nil)

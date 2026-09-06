@@ -1,15 +1,16 @@
 package tunnel
 
 import (
-	"context"
+	"runtime/debug"
 	"sync"
 	"time"
 
 	"go.uber.org/atomic"
 
-	"github.com/xjasonlyu/tun2socks/v2/core/adapter"
-	"github.com/xjasonlyu/tun2socks/v2/proxy"
-	"github.com/xjasonlyu/tun2socks/v2/tunnel/statistic"
+	"github.com/FashionFarmer/tun2socks/v2/core/adapter"
+	"github.com/FashionFarmer/tun2socks/v2/log"
+	"github.com/FashionFarmer/tun2socks/v2/proxy"
+	"github.com/FashionFarmer/tun2socks/v2/tunnel/statistic"
 )
 
 const (
@@ -38,47 +39,52 @@ type Tunnel struct {
 	// Where the Tunnel statistics are sent to.
 	manager *statistic.Manager
 
-	procOnce   sync.Once
-	procCancel context.CancelFunc
+	procOnce    sync.Once
+	closeOnce   sync.Once
+	done        chan struct{}
+	processDone chan struct{}
 }
 
 func New(proxy proxy.Proxy, manager *statistic.Manager) *Tunnel {
 	return &Tunnel{
-		tcpQueue:   make(chan adapter.TCPConn),
-		udpQueue:   make(chan adapter.UDPConn),
-		udpTimeout: atomic.NewDuration(udpSessionTimeout),
-		proxy:      proxy,
-		manager:    manager,
-		procCancel: func() { /* nop */ },
+		tcpQueue:    make(chan adapter.TCPConn),
+		udpQueue:    make(chan adapter.UDPConn),
+		udpTimeout:  atomic.NewDuration(udpSessionTimeout),
+		proxy:       proxy,
+		manager:     manager,
+		done:        make(chan struct{}),
+		processDone: make(chan struct{}),
 	}
 }
 
-// TCPIn return fan-in TCP queue.
-func (t *Tunnel) TCPIn() chan<- adapter.TCPConn {
-	return t.tcpQueue
-}
-
-// UDPIn return fan-in UDP queue.
-func (t *Tunnel) UDPIn() chan<- adapter.UDPConn {
-	return t.udpQueue
-}
-
+// HandleTCP queues a TCP flow unless the tunnel has already closed. Keeping
+// the queue private prevents embedders from bypassing the close-aware path and
+// blocking forever on a send after Close.
 func (t *Tunnel) HandleTCP(conn adapter.TCPConn) {
-	t.TCPIn() <- conn
+	select {
+	case t.tcpQueue <- conn:
+	case <-t.done:
+		_ = conn.Close()
+	}
 }
 
+// HandleUDP has the same close-aware ownership semantics as HandleTCP.
 func (t *Tunnel) HandleUDP(conn adapter.UDPConn) {
-	t.UDPIn() <- conn
+	select {
+	case t.udpQueue <- conn:
+	case <-t.done:
+		_ = conn.Close()
+	}
 }
 
-func (t *Tunnel) process(ctx context.Context) {
+func (t *Tunnel) process() {
 	for {
 		select {
 		case conn := <-t.tcpQueue:
-			go t.handleTCPConn(conn)
+			safeGo("handle TCP", func() { t.handleTCPConn(conn) })
 		case conn := <-t.udpQueue:
-			go t.handleUDPConn(conn)
-		case <-ctx.Done():
+			safeGo("handle UDP", func() { t.handleUDPConn(conn) })
+		case <-t.done:
 			return
 		}
 	}
@@ -87,15 +93,32 @@ func (t *Tunnel) process(ctx context.Context) {
 // ProcessAsync can be safely called multiple times, but will only be effective once.
 func (t *Tunnel) ProcessAsync() {
 	t.procOnce.Do(func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		t.procCancel = cancel
-		go t.process(ctx)
+		go func() {
+			defer close(t.processDone)
+			defer recoverPanic("process")
+			t.process()
+		}()
 	})
 }
 
 // Close closes the Tunnel and releases its resources.
 func (t *Tunnel) Close() {
-	t.procCancel()
+	t.ProcessAsync()
+	t.closeOnce.Do(func() { close(t.done) })
+	<-t.processDone
+}
+
+func safeGo(name string, fn func()) {
+	go func() {
+		defer recoverPanic(name)
+		fn()
+	}()
+}
+
+func recoverPanic(name string) {
+	if recovered := recover(); recovered != nil {
+		log.Errorf("[TUNNEL] panic recovered in %s: %v\n%s", name, recovered, debug.Stack())
+	}
 }
 
 func (t *Tunnel) Proxy() proxy.Proxy {

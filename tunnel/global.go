@@ -3,27 +3,32 @@ package tunnel
 import (
 	"sync"
 
-	"github.com/xjasonlyu/tun2socks/v2/proxy/reject"
-	"github.com/xjasonlyu/tun2socks/v2/tunnel/statistic"
+	"github.com/FashionFarmer/tun2socks/v2/proxy/reject"
+	"github.com/FashionFarmer/tun2socks/v2/tunnel/statistic"
 )
 
 var (
-	_globalMu sync.RWMutex
-	_globalT  *Tunnel
+	_globalMu  sync.RWMutex
+	_globalT   *Tunnel
+	globalOnce sync.Once
 )
 
-func init() {
-	t := New(
-		&reject.Reject{}, /* default: reject */
-		statistic.DefaultManager,
-	)
-	ReplaceGlobal(t)
-	T().ProcessAsync()
+func ensureGlobal() {
+	globalOnce.Do(func() {
+		statistic.DefaultManager.Start()
+		t := New(
+			&reject.Reject{}, /* default: reject */
+			statistic.DefaultManager,
+		)
+		ReplaceGlobal(t)
+		t.ProcessAsync()
+	})
 }
 
 // T returns the global Tunnel, which can be reconfigured with
 // ReplaceGlobal. It's safe for concurrent use.
 func T() *Tunnel {
+	ensureGlobal()
 	_globalMu.RLock()
 	t := _globalT
 	_globalMu.RUnlock()

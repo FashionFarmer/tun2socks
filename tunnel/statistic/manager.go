@@ -7,18 +7,31 @@ import (
 	"go.uber.org/atomic"
 )
 
-var DefaultManager *Manager
+// DefaultManager is retained for the command-line compatibility layer. It is
+// dormant until the global tunnel is first requested, so library instances do
+// not acquire a process-lifetime statistics goroutine merely by importing this
+// package.
+var DefaultManager = newManager()
 
-func init() {
-	DefaultManager = &Manager{
+// NewManager creates an independent traffic and connection statistics manager.
+// Call Close when the owning tunnel instance stops.
+func NewManager() *Manager {
+	m := newManager()
+	m.Start()
+	return m
+}
+
+func newManager() *Manager {
+	return &Manager{
 		uploadTemp:    atomic.NewInt64(0),
 		downloadTemp:  atomic.NewInt64(0),
 		uploadBlip:    atomic.NewInt64(0),
 		downloadBlip:  atomic.NewInt64(0),
 		uploadTotal:   atomic.NewInt64(0),
 		downloadTotal: atomic.NewInt64(0),
+		stop:          make(chan struct{}),
+		done:          make(chan struct{}),
 	}
-	go DefaultManager.handle()
 }
 
 type Manager struct {
@@ -29,6 +42,18 @@ type Manager struct {
 	downloadBlip  *atomic.Int64
 	uploadTotal   *atomic.Int64
 	downloadTotal *atomic.Int64
+	stop          chan struct{}
+	done          chan struct{}
+	startOnce     sync.Once
+	closeOnce     sync.Once
+}
+
+// Start activates rate sampling. It is idempotent.
+func (m *Manager) Start() {
+	if m == nil {
+		return
+	}
+	m.startOnce.Do(func() { go m.handle() })
 }
 
 func (m *Manager) Join(c tracker) {
@@ -78,13 +103,37 @@ func (m *Manager) ResetStatistic() {
 
 func (m *Manager) handle() {
 	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	defer close(m.done)
 
-	for range ticker.C {
-		m.uploadBlip.Store(m.uploadTemp.Load())
-		m.uploadTemp.Store(0)
-		m.downloadBlip.Store(m.downloadTemp.Load())
-		m.downloadTemp.Store(0)
+	for {
+		select {
+		case <-ticker.C:
+			m.uploadBlip.Store(m.uploadTemp.Load())
+			m.uploadTemp.Store(0)
+			m.downloadBlip.Store(m.downloadTemp.Load())
+			m.downloadTemp.Store(0)
+		case <-m.stop:
+			return
+		}
 	}
+}
+
+// Close stops the manager and closes every connection still tracked by it.
+// It is safe to call more than once.
+func (m *Manager) Close() {
+	if m == nil {
+		return
+	}
+	m.closeOnce.Do(func() {
+		m.Start()
+		m.connections.Range(func(_, value any) bool {
+			_ = value.(tracker).Close()
+			return true
+		})
+		close(m.stop)
+		<-m.done
+	})
 }
 
 type Snapshot struct {

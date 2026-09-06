@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"time"
 
-	M "github.com/xjasonlyu/tun2socks/v2/metadata"
-	"github.com/xjasonlyu/tun2socks/v2/proxy"
+	M "github.com/FashionFarmer/tun2socks/v2/metadata"
+	"github.com/FashionFarmer/tun2socks/v2/proxy"
 )
 
 var _ proxy.Proxy = (*Reject)(nil)

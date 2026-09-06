@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xjasonlyu/tun2socks/v2/buffer"
-	"github.com/xjasonlyu/tun2socks/v2/core/adapter"
-	"github.com/xjasonlyu/tun2socks/v2/log"
-	M "github.com/xjasonlyu/tun2socks/v2/metadata"
-	"github.com/xjasonlyu/tun2socks/v2/tunnel/statistic"
+	"github.com/FashionFarmer/tun2socks/v2/buffer"
+	"github.com/FashionFarmer/tun2socks/v2/core/adapter"
+	"github.com/FashionFarmer/tun2socks/v2/log"
+	M "github.com/FashionFarmer/tun2socks/v2/metadata"
+	"github.com/FashionFarmer/tun2socks/v2/tunnel/statistic"
 )
 
 func (t *Tunnel) handleTCPConn(originConn adapter.TCPConn) {
@@ -48,8 +48,8 @@ func pipe(origin, remote net.Conn) {
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 
-	go unidirectionalStream(remote, origin, "origin->remote", &wg)
-	go unidirectionalStream(origin, remote, "remote->origin", &wg)
+	safeGo("TCP origin->remote", func() { unidirectionalStream(remote, origin, "origin->remote", &wg) })
+	safeGo("TCP remote->origin", func() { unidirectionalStream(origin, remote, "remote->origin", &wg) })
 
 	wg.Wait()
 }
