@@ -36,23 +36,23 @@ func TestSniffTCPMatched(t *testing.T) {
 	defer server.Close()
 	go func() { client.Write([]byte("hello world")); client.Close() }()
 
-	proto, host, buf := sniffTCP(server, fakeSniffer{proto: "x", host: "h", need: 5, max: 100, timeout: time.Second})
-	if proto != "x" || host != "h" {
-		t.Fatalf("got (%q,%q), want (x,h)", proto, host)
+	proto, host, outcome, buf := sniffTCP(server, fakeSniffer{proto: "x", host: "h", need: 5, max: 100, timeout: time.Second})
+	if proto != "x" || host != "h" || outcome != sniff.OutcomeMatched {
+		t.Fatalf("got (%q,%q,%q), want (x,h,matched)", proto, host, outcome)
 	}
 	if !bytes.Equal(buf, []byte("hello world")) {
 		t.Fatalf("buffered %q, want the full leading bytes for replay", buf)
 	}
 }
 
-func TestSniffTCPNotApplicable(t *testing.T) {
+func TestSniffTCPUnrecognized(t *testing.T) {
 	client, server := net.Pipe()
 	defer server.Close()
 	go func() { client.Write([]byte("data")); client.Close() }()
 
-	proto, host, buf := sniffTCP(server, fakeSniffer{need: 0, max: 100, timeout: time.Second})
-	if proto != "" || host != "" {
-		t.Fatalf("got (%q,%q), want empty", proto, host)
+	proto, host, outcome, buf := sniffTCP(server, fakeSniffer{need: 0, max: 100, timeout: time.Second})
+	if proto != "" || host != "" || outcome != sniff.OutcomeUnrecognized {
+		t.Fatalf("got (%q,%q,%q), want ('','',unrecognized)", proto, host, outcome)
 	}
 	if !bytes.Equal(buf, []byte("data")) {
 		t.Fatalf("buffered %q, want the read bytes preserved for replay", buf)
@@ -64,9 +64,9 @@ func TestSniffTCPServerSpeaksFirst(t *testing.T) {
 	defer server.Close()
 
 	start := time.Now()
-	proto, host, buf := sniffTCP(server, fakeSniffer{need: 5, max: 100, timeout: 50 * time.Millisecond})
-	if proto != "" || host != "" || len(buf) != 0 {
-		t.Fatalf("got (%q,%q,%d bytes), want empty on timeout", proto, host, len(buf))
+	proto, host, outcome, buf := sniffTCP(server, fakeSniffer{need: 5, max: 100, timeout: 50 * time.Millisecond})
+	if proto != "" || host != "" || len(buf) != 0 || outcome != sniff.OutcomeIndeterminate {
+		t.Fatalf("got (%q,%q,%q,%d bytes), want ('','',indeterminate,0) on timeout", proto, host, outcome, len(buf))
 	}
 	if elapsed := time.Since(start); elapsed < 40*time.Millisecond {
 		t.Fatalf("returned after %v, want it to wait out the sniff timeout", elapsed)

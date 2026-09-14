@@ -22,6 +22,12 @@ type Metadata struct {
 	// Protocol is the application-layer protocol a Sniffer identified, e.g.
 	// "tls", "http", "dns". Empty when no sniffing ran or nothing matched.
 	Protocol string `json:"protocol,omitempty"`
+	// SniffOutcome records how sniffing classified the flow, for an embedder's
+	// admission policy and for observability: "matched" (identified),
+	// "unrecognized" (enough leading bytes seen, no protocol matched),
+	// "indeterminate" (no classifiable bytes in time, e.g. server-speaks-first).
+	// Empty when sniffing did not run.
+	SniffOutcome string `json:"sniffOutcome,omitempty"`
 }
 
 func (m *Metadata) DestinationAddrPort() netip.AddrPort {

@@ -11,18 +11,24 @@ import (
 const sniffReadChunk = 2048
 
 // sniffTCP reads the client's leading bytes up to the Sniffer's byte budget or
-// its timeout, returning the identified protocol and host — both empty when
-// nothing matched or the flow spoke no bytes (a server-speaks-first protocol) —
-// along with every byte read, so the caller can replay them into the pipe.
+// its timeout and classifies the flow. It returns the identified protocol and
+// host (empty unless matched), the outcome (one of sniff.Outcome*; empty when
+// sniffing was disabled by a zero budget), and every byte read so the caller can
+// replay them into the pipe.
 //
-// It fails open by construction: any read error, timeout, exhausted budget, or
-// NotApplicable verdict yields empty results and whatever was buffered. The
-// decision of what to do with an unidentified flow belongs to the embedder's
-// routing and admission policy, not to the stack.
-func sniffTCP(conn net.Conn, s sniff.Sniffer) (proto, host string, buffered []byte) {
+// It fails open by construction: it never drops a flow, only classifies it. What
+// to do with an unrecognized or indeterminate flow belongs to the embedder's
+// admission policy, not to the stack.
+//
+//   - matched:       a Sniffer identified the protocol.
+//   - unrecognized:  the Sniffer ruled everything out, or the byte budget was
+//     spent without a verdict — enough was seen and it is not a known protocol.
+//   - indeterminate: the read ended (timeout or EOF) before a verdict, including
+//     the server-speaks-first case where no bytes arrived at all.
+func sniffTCP(conn net.Conn, s sniff.Sniffer) (proto, host, outcome string, buffered []byte) {
 	maxBytes, timeout := s.Budget()
 	if maxBytes <= 0 || timeout <= 0 {
-		return "", "", nil
+		return "", "", "", nil
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(timeout))
 	defer conn.SetReadDeadline(time.Time{})
@@ -36,16 +42,16 @@ func sniffTCP(conn net.Conn, s sniff.Sniffer) (proto, host string, buffered []by
 			p, h, status := s.Sniff(buf)
 			switch status {
 			case sniff.Matched:
-				return p, h, buf
+				return p, h, sniff.OutcomeMatched, buf
 			case sniff.NotApplicable:
-				return "", "", buf
+				return "", "", sniff.OutcomeUnrecognized, buf
 			}
 		}
 		if err != nil {
-			return "", "", buf
+			return "", "", sniff.OutcomeIndeterminate, buf
 		}
 	}
-	return "", "", buf
+	return "", "", sniff.OutcomeUnrecognized, buf
 }
 
 // cachedConn replays already-read leading bytes before yielding the live conn,

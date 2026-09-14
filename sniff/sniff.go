@@ -28,6 +28,15 @@ const (
 	Matched
 )
 
+// Outcome values are recorded on a flow's metadata (Metadata.SniffOutcome) for
+// an embedder's admission and observability. They are strings so they cross the
+// module boundary and appear in metadata JSON without a shared enum type.
+const (
+	OutcomeMatched       = "matched"       // a protocol was identified
+	OutcomeUnrecognized  = "unrecognized"  // enough leading bytes seen, none matched
+	OutcomeIndeterminate = "indeterminate" // no classifiable bytes in time
+)
+
 // Sniffer identifies a flow from its client-originated leading bytes. An
 // implementation must be a pure function of data: no I/O, no per-flow state,
 // and it must never panic on malformed or adversarial input.

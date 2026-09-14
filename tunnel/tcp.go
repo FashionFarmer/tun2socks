@@ -31,8 +31,8 @@ func (t *Tunnel) handleTCPConn(originConn adapter.TCPConn) {
 	// bytes consumed are replayed into the pipe, so sniffing is transparent.
 	src := net.Conn(originConn)
 	if t.sniffer != nil {
-		proto, host, prefix := sniffTCP(originConn, t.sniffer)
-		metadata.Protocol, metadata.Host = proto, host
+		proto, host, outcome, prefix := sniffTCP(originConn, t.sniffer)
+		metadata.Protocol, metadata.Host, metadata.SniffOutcome = proto, host, outcome
 		if len(prefix) > 0 {
 			src = &cachedConn{TCPConn: originConn, cache: prefix}
 		}
