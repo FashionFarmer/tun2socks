@@ -10,6 +10,7 @@ import (
 	"github.com/FashionFarmer/tun2socks/v2/core/adapter"
 	"github.com/FashionFarmer/tun2socks/v2/log"
 	"github.com/FashionFarmer/tun2socks/v2/proxy"
+	"github.com/FashionFarmer/tun2socks/v2/sniff"
 	"github.com/FashionFarmer/tun2socks/v2/tunnel/statistic"
 )
 
@@ -35,6 +36,10 @@ type Tunnel struct {
 	// Internal proxy.Proxy for Tunnel.
 	proxyMu sync.RWMutex
 	proxy   proxy.Proxy
+
+	// Optional protocol sniffer, set once before ProcessAsync and read-only
+	// thereafter. nil disables sniffing.
+	sniffer sniff.Sniffer
 
 	// Where the Tunnel statistics are sent to.
 	manager *statistic.Manager
@@ -136,4 +141,11 @@ func (t *Tunnel) SetProxy(proxy proxy.Proxy) {
 
 func (t *Tunnel) SetUDPTimeout(timeout time.Duration) {
 	t.udpTimeout.Store(timeout)
+}
+
+// SetSniffer installs the protocol sniffer. It must be called before
+// ProcessAsync starts handling flows; the sniffer is read without locking on
+// the hot path and is not meant to be swapped at runtime.
+func (t *Tunnel) SetSniffer(s sniff.Sniffer) {
+	t.sniffer = s
 }

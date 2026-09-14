@@ -17,6 +17,7 @@ import (
 	"github.com/FashionFarmer/tun2socks/v2/core/device/fdbased"
 	"github.com/FashionFarmer/tun2socks/v2/core/option"
 	"github.com/FashionFarmer/tun2socks/v2/proxy"
+	"github.com/FashionFarmer/tun2socks/v2/sniff"
 	"github.com/FashionFarmer/tun2socks/v2/tunnel"
 	"github.com/FashionFarmer/tun2socks/v2/tunnel/statistic"
 )
@@ -28,6 +29,10 @@ type Options struct {
 	MTU          uint32
 	FDOffset     int
 	Proxy        proxy.Proxy
+	// Sniffer, when non-nil, identifies each TCP flow's protocol and host from
+	// the client's leading bytes before it is dialed, recording the result on
+	// the flow metadata. nil disables sniffing.
+	Sniffer      sniff.Sniffer
 	ICMPHandler  adapter.NetworkHandler
 	StackOptions []option.Option
 }
@@ -67,6 +72,9 @@ func Start(opts Options) (_ *Instance, err error) {
 	}()
 	manager := statistic.NewManager()
 	handler := tunnel.New(opts.Proxy, manager)
+	if opts.Sniffer != nil {
+		handler.SetSniffer(opts.Sniffer)
+	}
 	handler.ProcessAsync()
 	netstack, err := core.CreateStack(&core.Config{
 		LinkEndpoint: dev, TransportHandler: handler,

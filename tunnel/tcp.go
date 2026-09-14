@@ -26,6 +26,18 @@ func (t *Tunnel) handleTCPConn(originConn adapter.TCPConn) {
 		DstPort: id.LocalPort,
 	}
 
+	// Sniff the client's leading bytes before dialing, so a route can be chosen
+	// on the real protocol and host rather than the destination IP alone. The
+	// bytes consumed are replayed into the pipe, so sniffing is transparent.
+	src := net.Conn(originConn)
+	if t.sniffer != nil {
+		proto, host, prefix := sniffTCP(originConn, t.sniffer)
+		metadata.Protocol, metadata.Host = proto, host
+		if len(prefix) > 0 {
+			src = &cachedConn{TCPConn: originConn, cache: prefix}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), tcpConnectTimeout)
 	defer cancel()
 
@@ -40,7 +52,7 @@ func (t *Tunnel) handleTCPConn(originConn adapter.TCPConn) {
 	defer remoteConn.Close()
 
 	log.Infof("[TCP] %s <-> %s", metadata.SourceAddress(), metadata.DestinationAddress())
-	pipe(originConn, remoteConn)
+	pipe(src, remoteConn)
 }
 
 // pipe copies data to & from provided net.Conn(s) bidirectionally.

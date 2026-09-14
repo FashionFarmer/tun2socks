@@ -14,6 +14,14 @@ type Metadata struct {
 	SrcPort uint16     `json:"sourcePort"`
 	MidPort uint16     `json:"dialerPort"`
 	DstPort uint16     `json:"destinationPort"`
+
+	// Host is the hostname the flow is trying to reach, when a Sniffer read one
+	// from the client's leading bytes (e.g. TLS SNI, HTTP Host, DNS question).
+	// Empty when no sniffing ran or the protocol carried no name.
+	Host string `json:"host,omitempty"`
+	// Protocol is the application-layer protocol a Sniffer identified, e.g.
+	// "tls", "http", "dns". Empty when no sniffing ran or nothing matched.
+	Protocol string `json:"protocol,omitempty"`
 }
 
 func (m *Metadata) DestinationAddrPort() netip.AddrPort {
