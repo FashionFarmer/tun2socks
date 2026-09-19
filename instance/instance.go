@@ -15,6 +15,7 @@ import (
 	"github.com/FashionFarmer/tun2socks/v2/core/adapter"
 	"github.com/FashionFarmer/tun2socks/v2/core/device"
 	"github.com/FashionFarmer/tun2socks/v2/core/device/fdbased"
+	"github.com/FashionFarmer/tun2socks/v2/core/device/tun"
 	"github.com/FashionFarmer/tun2socks/v2/core/option"
 	"github.com/FashionFarmer/tun2socks/v2/proxy"
 	"github.com/FashionFarmer/tun2socks/v2/sniff"
@@ -25,10 +26,15 @@ import (
 // Options configures one embeddable TUN stack. The instance takes ownership of
 // TUNFD after Start succeeds and closes it from Close.
 type Options struct {
-	TUNFD        int
-	MTU          uint32
-	FDOffset     int
-	Proxy        proxy.Proxy
+	TUNFD int
+	// TUNName, when set, opens a driver-managed TUN device by name (wintun on
+	// Windows, utun/tun elsewhere) instead of adopting TUNFD. Exactly one of
+	// TUNName or a valid TUNFD is used; TUNName takes precedence. It is how a
+	// host with no file descriptor to hand over (Windows) attaches a TUN.
+	TUNName  string
+	MTU      uint32
+	FDOffset int
+	Proxy    proxy.Proxy
 	// Sniffer, when non-nil, identifies each TCP flow's protocol and host from
 	// the client's leading bytes before it is dialed, recording the result on
 	// the flow metadata. nil disables sniffing.
@@ -47,23 +53,39 @@ type Instance struct {
 
 // Start returns errors to its caller and never terminates the hosting process.
 func Start(opts Options) (_ *Instance, err error) {
-	if opts.TUNFD < 0 {
-		return nil, errors.New("tun2socks: invalid TUN fd")
-	}
-	if opts.FDOffset < 0 {
-		return nil, errors.New("tun2socks: invalid fd offset")
-	}
 	if opts.Proxy == nil {
 		return nil, errors.New("tun2socks: nil proxy")
 	}
-	instanceFD, err := duplicateTunFD(opts.TUNFD)
-	if err != nil {
-		return nil, fmt.Errorf("tun2socks: duplicate TUN fd: %w", err)
-	}
-	dev, err := fdbased.Open(strconv.Itoa(instanceFD), opts.MTU, opts.FDOffset)
-	if err != nil {
-		_ = closeTunFD(instanceFD)
-		return nil, fmt.Errorf("tun2socks: open TUN fd: %w", err)
+
+	// Obtain the link device one of two ways. A name opens a driver-managed TUN
+	// (wintun on Windows); otherwise the instance adopts a file descriptor the
+	// host already opened (Android's VpnService), duplicating it and taking
+	// ownership so the caller's copy can be closed. ownedFD >= 0 marks the fd
+	// path, whose original descriptor is closed only after the stack is up.
+	var dev device.Device
+	ownedFD := -1
+	if opts.TUNName != "" {
+		dev, err = tun.Open(opts.TUNName, opts.MTU)
+		if err != nil {
+			return nil, fmt.Errorf("tun2socks: open TUN %q: %w", opts.TUNName, err)
+		}
+	} else {
+		if opts.TUNFD < 0 {
+			return nil, errors.New("tun2socks: invalid TUN fd")
+		}
+		if opts.FDOffset < 0 {
+			return nil, errors.New("tun2socks: invalid fd offset")
+		}
+		instanceFD, derr := duplicateTunFD(opts.TUNFD)
+		if derr != nil {
+			return nil, fmt.Errorf("tun2socks: duplicate TUN fd: %w", derr)
+		}
+		dev, err = fdbased.Open(strconv.Itoa(instanceFD), opts.MTU, opts.FDOffset)
+		if err != nil {
+			_ = closeTunFD(instanceFD)
+			return nil, fmt.Errorf("tun2socks: open TUN fd: %w", err)
+		}
+		ownedFD = opts.TUNFD
 	}
 	defer func() {
 		if err != nil {
@@ -85,12 +107,14 @@ func Start(opts Options) (_ *Instance, err error) {
 		manager.Close()
 		return nil, fmt.Errorf("tun2socks: create stack: %w", err)
 	}
-	if err := closeTunFD(opts.TUNFD); err != nil {
-		netstack.Close()
-		netstack.Wait()
-		handler.Close()
-		manager.Close()
-		return nil, fmt.Errorf("tun2socks: take ownership of TUN fd: %w", err)
+	if ownedFD >= 0 {
+		if err = closeTunFD(ownedFD); err != nil {
+			netstack.Close()
+			netstack.Wait()
+			handler.Close()
+			manager.Close()
+			return nil, fmt.Errorf("tun2socks: take ownership of TUN fd: %w", err)
+		}
 	}
 	return &Instance{device: dev, stack: netstack, tunnel: handler, statistics: manager}, nil
 }
